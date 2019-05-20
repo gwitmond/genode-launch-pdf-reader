@@ -1,4 +1,7 @@
-set build_components { app/pdf_view }
+set build_components { app/pdf_view
+                       app/fs_query
+                       app/sequence
+}
 
 source ${genode_dir}/repos/base/run/platform_drv.inc
 
@@ -12,9 +15,19 @@ import_from_depot \
 	[depot_user]/src/[base_src] \
 	[depot_user]/src/init \
 	[depot_user]/src/nitpicker \
+	[depot_user]/src/coreutils \
+	[depot_user]/src/bash \
+	[depot_user]/src/init \
+	[depot_user]/src/libc \
+	[depot_user]/src/noux \
+	[depot_user]/src/posix \
+	[depot_user]/src/report_rom \
+	[depot_user]/src/rom_to_file \
+	[depot_user]/src/vfs \
+	[depot_user]/src/vfs_import
 
 set config {
-<config>
+<config verbose="yes">
 	<parent-provides>
 		<service name="ROM"/>
 		<service name="IRQ"/>
@@ -53,7 +66,6 @@ set config {
 		<config focus="rom">
 			<domain name="pointer" layer="1" content="client" label="no" origin="pointer" />
 			<domain name="default" layer="2" content="client" label="no" hover="always"/>
-
 			<policy label_prefix="pointer" domain="pointer"/>
 			<default-policy domain="default"/>
 		</config>
@@ -78,6 +90,45 @@ set config {
 		</route>
 	</start>
 
+
+	<!-- pdf_share is the filesystem that Linux writes pdf files to. -->
+	<start name="pdf_share">
+		<binary name="vfs"/>
+		<resource name="RAM" quantum="128M"/>
+		<provides> <service name="File_system"/> </provides>
+		<config verbose="yes">
+			<vfs>
+				<ram />
+			</vfs>
+			<default-policy root="/" writeable="yes" />
+		</config>
+	</start>
+
+
+	<!-- report_new_pdf reports to the pdf-viewer when there is a new pdf -->
+	<start name="report_new_pdf">
+	        <binary name="report_rom"/>
+		<resource name="RAM" quantum="1M"/>
+		<provides> <service name="Report"/> <service name="ROM"/> </provides>
+		<config verbose="yes"/>
+	</start>
+
+
+	<!-- fs_query monitors the pdf_share for new files and writes a report into report_new_pdf -->
+	<start name="fs_query">
+		<resource name="RAM" quantum="1M"/>
+		<config verbose="yes">
+			<vfs> <fs writeable="yes"/> </vfs>
+			<query path="/" content="no"/>
+		</config>
+		<route>
+			<service name="File_system"> <child name="pdf_share" /> </service>
+			<service name="Report"> <child name="report_new_pdf" /> </service>
+			<any-service> <parent/> </any-service>
+		</route>
+	</start>
+
+<!--
 	<start name="pdf_view" caps="256">
 		<resource name="RAM" quantum="1G"/>
 		<config>
@@ -88,6 +139,8 @@ set config {
 			<libc stdout="/dev/log" stderr="/dev/log"/>
 		</config>
 	</start>
+-->
+
 </config>
 }
 
