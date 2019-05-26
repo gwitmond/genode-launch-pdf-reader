@@ -1,6 +1,7 @@
 set build_components { app/pdf_view
-                       app/fs_query
-                       app/sequence
+		       app/fs_query
+		       app/sequence
+		       app/launch_pdf_reader
 }
 
 source ${genode_dir}/repos/base/run/platform_drv.inc
@@ -21,8 +22,6 @@ import_from_depot \
 	[depot_user]/src/libc \
 	[depot_user]/src/noux \
 	[depot_user]/src/posix \
-	[depot_user]/src/report_rom \
-	[depot_user]/src/rom_to_file \
 	[depot_user]/src/vfs \
 	[depot_user]/src/vfs_import
 
@@ -43,10 +42,12 @@ set config {
 		<any-service> <parent/> <any-child/> </any-service>
 	</default-route>
 	<default caps="100"/>
+
 	<start name="timer">
 		<resource name="RAM" quantum="1M"/>
 		<provides><service name="Timer"/></provides>
 	</start>
+
 	<start name="drivers" caps="1000">
 		<resource name="RAM" quantum="32M" constrain_phys="yes"/>
 		<binary name="init"/>
@@ -91,10 +92,10 @@ set config {
 	</start>
 
 
-	<!-- pdf_share is the filesystem that Linux writes pdf files to. -->
+	<!-- pdf_share is the filesystem where Linux writes pdf files to. -->
 	<start name="pdf_share">
 		<binary name="vfs"/>
-		<resource name="RAM" quantum="128M"/>
+		<resource name="RAM" quantum="16M"/>
 		<provides> <service name="File_system"/> </provides>
 		<config verbose="yes">
 			<vfs>
@@ -105,12 +106,14 @@ set config {
 	</start>
 
 
-	<!-- report_new_pdf reports to the pdf-viewer when there is a new pdf -->
+	<!-- report_new_pdf reports to launch_pdf_reader when there is a new pdf -->
 	<start name="report_new_pdf">
-	        <binary name="report_rom"/>
+		<binary name="report_rom"/>
 		<resource name="RAM" quantum="1M"/>
 		<provides> <service name="Report"/> <service name="ROM"/> </provides>
-		<config verbose="yes"/>
+		<config verbose="yes">
+			<policy label="launch_pdf_reader -> report_new_pdf" report="fs_query -> listing" />
+		</config>
 	</start>
 
 
@@ -128,19 +131,65 @@ set config {
 		</route>
 	</start>
 
-<!--
-	<start name="pdf_view" caps="256">
-		<resource name="RAM" quantum="1G"/>
+
+	<!-- launch pdf_view when the report_new_pdf mentions there is a change in the fs -->
+	<start name="launch_pdf_reader" caps="500">
+	       <resource name="RAM" quantum="1G"/>
+	       <config verbose="yes">
+			<start name="pdf_view">
+			       <config>
+					<vfs>
+						<dir name="dev"> <log/> </dir>
+						<fs />
+					</vfs>
+					<libc stdout="/dev/log" stderr="/dev/log"/>
+				</config>
+			</start>
+		</config>
+		<route>
+			<service name="ROM" label="report_new_pdf"> <child name="report_new_pdf" /> </service>
+			<service name="ROM"> <parent/> </service>
+			<service name="Nitpicker">   <child name="wm" /> </service>
+			<service name="File_system"> <child name="pdf_share" /> </service>
+			<any-service> <any-child/> <parent/> </any-service>
+		</route>
+	</start>
+
+
+	<start name="test" caps="700">
+		<binary name="sequence"/>
+		<resource name="RAM" quantum="64M"/>
 		<config>
-			<vfs>
-				<rom name="test.pdf" />
-				<dir name="dev"> <log/> </dir>
-			</vfs>
-			<libc stdout="/dev/log" stderr="/dev/log"/>
+			<start name="sleep" caps="500">
+				<binary name="noux"/>
+				<config stdin="/dev/null" stdout="/dev/log" stderr="/dev/log" verbose="yes">
+					<fstab>
+						<tar name="coreutils.tar" />
+						<dir name="dev"> <log/> <null/> </dir>
+					</fstab>
+					<start name="/bin/sleep"> <arg value="10"/> </start>
+				</config>
+			</start>
+
+			<start name="add" caps="500">
+				<binary name="noux"/>
+				<config stdin="/dev/null" stdout="/dev/log" stderr="/dev/log" verbose="yes" >
+					<fstab>
+						<tar name="coreutils.tar" />
+						<dir name="dest"> <fs writeable="yes"/> </dir>
+						<dir name="dev"> <log/> <null/> </dir>
+						<dir name="source"> <rom name="test.pdf" /> </dir>
+					</fstab>
+
+					<start name="/bin/cp">
+						<arg value="/source/test.pdf" />
+						<!-- <arg value="/dev/null" /> -->
+						<arg value="/dest/foo.pdf" />
+					</start>
+				</config>
+			</start>
 		</config>
 	</start>
--->
-
 </config>
 }
 
@@ -170,13 +219,17 @@ append boot_modules {
 	libc.lib.so vfs.lib.so libm.lib.so
 	openjpeg.lib.so freetype.lib.so libpng.lib.so zlib.lib.so jbig2dec.lib.so
 	mupdf.lib.so jpeg.lib.so
+	fs_query
+	sequence
+	launch_pdf_reader
 	pdf_view
 	test.pdf
 }
 
 build_boot_image $boot_modules
 
-append qemu_args " -m 768"
+append qemu_args " -m 1536 "
+
+set env(SDL_VIDEO_X11_DGAMOUSE) 0
 
 run_genode_until forever
-
